@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use chrono::Local;
 use std::env;
 use std::fs;
@@ -13,8 +13,8 @@ fn main() -> Result<()> {
     let file_path = &args[1];
 
     // Read the file
-    let content = fs::read_to_string(file_path)
-        .context(format!("Failed to read file: {}", file_path))?;
+    let content =
+        fs::read_to_string(file_path).context(format!("Failed to read file: {}", file_path))?;
 
     // Parse the file content
     let mut lines = content.lines();
@@ -38,8 +38,8 @@ fn main() -> Result<()> {
     }
 
     // Validate JSON
-    let _json_value: serde_json::Value = serde_json::from_str(json_content)
-        .context("Failed to parse JSON content")?;
+    let _json_value: serde_json::Value =
+        serde_json::from_str(json_content).context("Failed to parse JSON content")?;
 
     // Create HTTP client
     let client = reqwest::blocking::Client::builder()
@@ -47,9 +47,13 @@ fn main() -> Result<()> {
         .context("Failed to create HTTP client")?;
 
     // Prepare the request
+    let content_length = json_content.as_bytes().len();
     let request = client
         .post(url)
         .header("Content-Type", "application/json")
+        .header("User-Agent", "yuan/0.2.1")
+        .header("Accept", "*/*")
+        .header("Content-Length", content_length)
         .body(json_content.to_string())
         .build()
         .context("Failed to build HTTP request")?;
@@ -63,11 +67,22 @@ fn main() -> Result<()> {
 
     // Log request
     log_content.push_str(&format!("> POST {} HTTP/1.1\n", request.url()));
-    log_content.push_str(&format!("> Host: {}\n", request.url().host_str().unwrap_or("")));
+    log_content.push_str(&format!(
+        "> Host: {}\n",
+        request.url().host_str().unwrap_or("")
+    ));
 
     // Log request headers
     for (name, value) in request.headers() {
-        log_content.push_str(&format!("> {}: {}\n", name, value.to_str().unwrap_or("<binary>")));
+        log_content.push_str(&format!(
+            "> {}: {}\n",
+            name,
+            value.to_str().unwrap_or("<binary>")
+        ));
+    }
+    // Ensure Content-Length appears even if reqwest decides to set/override it later
+    if !request.headers().contains_key("content-length") {
+        log_content.push_str(&format!("> Content-Length: {}\n", content_length));
     }
     log_content.push_str(">\n");
 
@@ -80,13 +95,19 @@ fn main() -> Result<()> {
         .context("Failed to send HTTP request")?;
 
     // Log response status
-    log_content.push_str(&format!("< HTTP/1.1 {} {}\n",
+    log_content.push_str(&format!(
+        "< HTTP/1.1 {} {}\n",
         response.status().as_u16(),
-        response.status().canonical_reason().unwrap_or("")));
+        response.status().canonical_reason().unwrap_or("")
+    ));
 
     // Log response headers
     for (name, value) in response.headers() {
-        log_content.push_str(&format!("< {}: {}\n", name, value.to_str().unwrap_or("<binary>")));
+        log_content.push_str(&format!(
+            "< {}: {}\n",
+            name,
+            value.to_str().unwrap_or("<binary>")
+        ));
     }
     log_content.push_str("<\n");
 
@@ -96,8 +117,9 @@ fn main() -> Result<()> {
     // Try to parse response as JSON
     if let Ok(response_json) = serde_json::from_str::<serde_json::Value>(&response_text) {
         // If it's valid JSON, log it (pretty printed)
-        log_content.push_str(&serde_json::to_string_pretty(&response_json)
-            .unwrap_or(response_text.clone()));
+        log_content.push_str(
+            &serde_json::to_string_pretty(&response_json).unwrap_or(response_text.clone()),
+        );
         log_content.push('\n');
     }
     // If not JSON, don't log the response body (as per requirements)
